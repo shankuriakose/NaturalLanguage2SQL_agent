@@ -1,0 +1,7 @@
+jupyter
+langchain
+langchain-community
+langgraph
+langchain-core
+langchain_google_genai
+python-dotenv
