@@ -1,0 +1,6 @@
+tox
+pytest
+flake8
+black
+isort
+httpx # Already in requirements.txt but good practice for test dependencies
