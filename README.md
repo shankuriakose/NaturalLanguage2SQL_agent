@@ -9,9 +9,11 @@ This project provides a FastAPI application serving an intelligent agent built w
 -   [Project Overview](#project-overview)
 -   [System Architecture](#system-architecture)
 -   [Development & Automation with Tox](#development--automation-with-tox)
+-   [Configuration](#configuration)
 -   [Running the Application](#running-the-application)
 -   [Connecting to a Custom Database](#connecting-to-a-custom-database)
 -   [Multi-Step Query Example](#multi-step-query-example)
+-   [Jupyter Notebook for Examples](#jupyter-notebook-for-examples)
 -   [Security Notes](#security-notes)
 -   [Contribution Guidelines](#contribution-guidelines)
 -   [FAQ](#faq)
@@ -29,36 +31,74 @@ This agent leverages the power of Large Language Models (LLMs) and the LangChain
 
 ## System Architecture
 
-The system combines a FastAPI web server with a LangChain SQL agent:
+The system combines a FastAPI web server (`app_api_handler.py`) with a LangChain SQL agent (`src/agent/agent.py`):
 
-1.  **API Request:** A client sends a POST request to the `/query` endpoint of the FastAPI server with a JSON payload containing the natural language question (e.g., `{"question": "Show me all customers from London"}`).
-2.  **FastAPI Server:** The server receives the request and passes the question to the LangChain agent.
-3.  **LangChain Agent:** LangChain orchestrates the process. It uses an LLM (configured via API key) to:
-    *   Understand the user's intent from the question.
-    *   Determine the necessary information from the database schema (obtained via the `SQLDatabase` connection).
-    *   Generate the appropriate SQL query (e.g., `SELECT * FROM Customers WHERE City = 'London';`).
-4.  **SQL Database Connection:** LangChain uses the `SQLDatabase` utility to interact with the target database (e.g., `northwind.db`).
-5.  **Database Execution:** The generated SQL query is executed against the database.
-6.  **Result Processing:** The raw database results are retrieved by the agent.
-7.  **LLM Response Generation:** The LLM formats the results into a natural language answer.
-8.  **API Response:** The FastAPI server sends a JSON response back to the client containing the answer (e.g., `{"answer": "Here are the customers based in London: ..."}`).
+1.  **API Request:** A client sends a POST request to the `/query` endpoint (`/app_api_handler.py`) of the FastAPI server. The request body is validated using the Pydantic `QueryRequest` model (`src/models/api_models.py`), containing the natural language question (e.g., `{"question": "Show me all customers from London"}`). A simple root endpoint `/` is also available.
+2.  **FastAPI Server:** The server receives the validated request and passes the question to the `run_sql_query_agent` function. Structured logging (`src/utils/logger.py`) records request details.
+3.  **LangChain Agent (`src/agent/agent.py`):** This module orchestrates the core logic:
+    *   **Database Connection:** Obtains a connection via LangChain's `SQLDatabase` utility, managed centrally (`src/database/connection.py`), defaulting to the included `data_base/northwind.db` SQLite database.
+    *   **LLM Initialization:** Initializes the configured Google Generative AI model (`ChatGoogleGenerativeAI` from `langchain_google_genai`), specified by the `MODEL_NAME` setting.
+    *   **Toolkit Setup:** Uses `SQLDatabaseToolkit` to provide the agent with tools to interact with the database schema and execute queries.
+    *   **Prompt Engineering:** Loads a pre-defined SQL agent prompt using `langchain.hub.pull`.
+    *   **Agent Creation:** Creates a ReAct-style agent using LangGraph's `create_react_agent`, combining the LLM, tools, and prompt.
+    *   **Query Execution:** The agent processes the question, potentially making multiple calls to the LLM and database tools to generate and execute the appropriate SQL query (e.g., `SELECT * FROM Customers WHERE City = 'London';`).
+4.  **Database Interaction:** The `SQLDatabase` utility and toolkit handle schema introspection and query execution against the target database.
+5.  **LLM Response Generation:** The agent uses the LLM to format the final query results into a natural language answer.
+6.  **API Response:** The FastAPI server sends a JSON response (using the Pydantic `QueryResponse` model) back to the client containing the answer (e.g., `{"answer": "Here are the customers based in London: ..."}`). Errors are caught and returned as standard HTTP exceptions.
 
+```mermaid
+graph TD
+    Client -- POST /query (QueryRequest) --> FastAPI(FastAPI Server - app_api_handler.py);
+    FastAPI -- question --> Agent(LangChain Agent - src/agent/agent.py);
+    Agent -- Get Connection --> DBConn(Database Connection - src/database/connection.py);
+    DBConn -- SQLDatabase --> DB[(Database - northwind.db)];
+    Agent -- Initialize --> LLM(LLM - ChatGoogleGenerativeAI);
+    Agent -- Uses --> Toolkit(SQLDatabaseToolkit);
+    Agent -- Pulls --> Prompt(Hub Prompt);
+    Agent -- Creates --> ReactAgent(React Agent - LangGraph);
+    ReactAgent -- Uses --> Toolkit;
+    ReactAgent -- Uses --> LLM;
+    Toolkit -- Interacts --> DB;
+    FastAPI -- answer (QueryResponse) --> Client;
+
+    subgraph "Configuration (src/config/settings.py)"
+        EnvConfig[.env File] --> PydanticSettings(Pydantic Settings);
+        PydanticSettings --> Agent;
+        PydanticSettings --> DBConn;
+    end
+
+    subgraph "Utilities"
+        Logging(Logging - src/utils/logger.py);
+        Models(Pydantic Models - src/models/api_models.py);
+    end
+
+    FastAPI --> Logging;
+    Agent --> Logging;
+    DBConn --> Logging;
+    Models --> FastAPI;
 ```
-+-------------+      +-----------------+      +-----------------+      +----------------------+      +---------------+      +-----------------+
-| Client      | ---> | FastAPI Server  | ---> | LangChain Agent | ---> | LLM (Query Gen)      | ---> | SQL Database  | <--- | Schema Info     |
-| (POST /query)|      | (main.py)       |      | (Orchestration) |      | (Schema Awareness)   |      | (Execution)   |      | (via SQLDatabase)|
-+-------------+      +-------+---------+      +-----------------+      +----------------------+      +-------+-------+      +-----------------+
-      ^                      |                                                                               |
-      |                      +------------------------------------<------------------------------------------+
-      |                                                            | LLM (Response Format) |
-      +----------------------<-------------------------------------+-----------------------+
-       (JSON Response)
-```
-*(Diagram: Simplified text representation of the API flow)*
+*(Diagram: Mermaid representation of the system architecture and key components)*
 
 ## Development & Automation with Tox
 
 This project uses [Tox](https://tox.wiki/) to automate testing, linting, and formatting across multiple Python versions in isolated environments. This ensures code quality and compatibility.
+
+*   **Testing:** Unit tests are located in the `tests/` directory and use `pytest` with `httpx.AsyncClient`. Tests mock the agent's behavior (`unittest.mock.patch`) to isolate the API layer.
+*   **Logging:** Structured logging is configured in `src/utils/logger.py`, outputting to both the console and a rotating file (`sql_agent.log`).
+
+## Configuration
+
+Configuration is managed using Pydantic Settings (`src/config/settings.py`) and environment variables loaded from a `.env` file (copy from `.env.example`).
+
+Key environment variables:
+
+*   `GOOGLE_API_KEY`: **Required.** Your API key for Google Generative AI (Gemini models).
+*   `DATABASE_URI`: Optional. The SQLAlchemy URI for your target database. Defaults to `sqlite:///data_base/northwind.db`.
+*   `MODEL_NAME`: Optional. The specific Google GenAI model to use. Defaults to `gemini-1.5-flash-latest`.
+*   `LANGCHAIN_API_KEY`: Optional. Your API key for LangSmith tracing.
+*   `LANGCHAIN_TRACING_V2`: Optional. Set to `true` to enable LangSmith tracing if the key is provided.
+*   `INCLUDE_TABLES`: Optional. A comma-separated list of table names to include (if you want to limit the agent's view).
+*   `SAMPLE_ROWS`: Optional. Number of sample rows to include in table info. Defaults to 3.
 
 1.  **Prerequisites:**
     *   Python 3.8+ installed. You might need multiple Python versions (e.g., 3.9, 3.10, 3.11) installed and available in your PATH if you want to run tests against all configured environments.
@@ -131,14 +171,14 @@ Running the application for manual testing or development is separate from the T
     *   Created and configured your `.env` file in the project root with the necessary API keys (especially `GOOGLE_API_KEY`). You might need to copy it from `.env.example` first (`cp .env.example .env`).
 
 2.  **Run the FastAPI Server:**
-    While your main development virtual environment is active, start the API server using Uvicorn:
+    While your main development virtual environment is active, start the API server (`app_api_handler.py`) using Uvicorn:
     ```bash
-    uvicorn ai_sql_agent.app:app --reload
+    uvicorn app_api_handler:app --reload
     ```
-    *   `ai_sql_agent.app:app`: Tells Uvicorn where to find the FastAPI application instance (`app`).
+    *   `app_api_handler:app`: Tells Uvicorn where to find the FastAPI application instance (`app`) in the root `app_api_handler.py` file.
     *   `--reload`: Automatically restarts the server when code changes are detected (useful during development).
 
-    The server will typically start on `http://127.0.0.1:8000`. Look for output similar to:
+    The server will typically start on `http://127.0.0.1:8000`. You can access the root endpoint at `/` and the main query endpoint at `/query`. Look for output similar to:
     ```
     INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
     INFO:     Started reloader process [xxxxx] using StatReload
@@ -151,7 +191,7 @@ Running the application for manual testing or development is separate from the T
     *(Note: If initialization fails due to a missing `GOOGLE_API_KEY` or database connection issues, you'll see error messages here, and the `/query` endpoint might return an error.)*
 
 3.  **Send Queries via API:**
-    Use a tool like `curl` or any API client (like Postman, Insomnia) to send POST requests to the `/query` endpoint.
+    Use a tool like `curl` or any API client (like Postman, Insomnia) to send POST requests to the `/query` endpoint. The request body should be JSON conforming to the `QueryRequest` model (see `src/models/api_models.py`).
 
     **Example using `curl`:**
     ```bash
@@ -161,12 +201,6 @@ Running the application for manual testing or development is separate from the T
       "question": "How many customers are there in Germany?"
     }'
     ```
-
-    **Parameters:**
-    *   `-X POST`: Specifies the HTTP method.
-    *   `http://127.0.0.1:8000/query`: The URL of the query endpoint.
-    *   `-H "Content-Type: application/json"`: Sets the content type header.
-    *   `-d '{ "question": "..." }'`: Provides the JSON payload containing the natural language question.
 
 4.  **Receive the Answer:**
     The API will respond with a JSON object containing the answer.
@@ -191,17 +225,16 @@ Running the application for manual testing or development is separate from the T
 
 ## Connecting to a Custom Database
 
-To connect the API agent to your own database:
+The database connection is managed centrally in `src/database/connection.py` using LangChain's `SQLDatabase`. To connect the API agent to your own database:
 
-1.  **Install Database Driver:** If you are using a database other than SQLite, ensure the necessary driver is installed in your *main development* virtual environment. Add the driver (e.g., `psycopg2-binary`) to `requirements.txt` and run `pip install -r requirements.txt` again while the environment is active.
-2.  **Update Database URI:** Configure the database connection.
+1.  **Install Database Driver:** If you are using a database other than SQLite, ensure the necessary driver is installed in your *main development* virtual environment. Add the driver (e.g., `psycopg2-binary` for PostgreSQL) to `requirements.txt` and run `pip install -r requirements.txt` again while the environment is active.
+2.  **Update Database URI:** Configure the database connection primarily via the `DATABASE_URI` environment variable (see [Configuration](#configuration)).
 
-    *   **Via `.env` file:** The recommended method is to set the `DATABASE_URI` environment variable in your `.env` file. The application will automatically pick it up.
+    *   **Via `.env` file:** Set the `DATABASE_URI` environment variable in your `.env` file. This is the recommended method.
         ```dotenv
-        # In .env file
+        # Example for PostgreSQL in .env file
         DATABASE_URI="postgresql+psycopg2://user:password@host:port/database"
         ```
-    *   **Modifying Code (If necessary):** If you need more complex configuration, you can modify the `DATABASE_URI` definition directly within `ai_sql_agent/app.py`, but using `.env` is preferred.
 
     **Example URI Formats:**
     *   **SQLite (File-based):** `sqlite:///path/to/your/database.db`
@@ -210,140 +243,13 @@ To connect the API agent to your own database:
     *   **MySQL:** `mysql+mysqlconnector://user:password@host:port/database`
     *   **Other Databases:** Refer to the [SQLAlchemy documentation](https://docs.sqlalchemy.org/en/20/core/engines.html#database-urls) for the correct URI format.
 
-3.  **Schema Awareness (Optional):** LangChain's `SQLDatabase` utility automatically inspects the schema. For very large schemas, you can limit the tables the agent sees by modifying the `SQLDatabase` instantiation in `ai_sql_agent/app.py`:
-    ```python
-    # In ai_sql_agent/app.py, when creating the db object:
-    db = SQLDatabase.from_uri(
-        DATABASE_URI, # Uses the URI from .env or default
-        include_tables=['users', 'orders'], # Example: Only include these tables
-        sample_rows_in_table_info=3 # Include sample rows in schema info
-    )
-    ```
+3.  **Schema Awareness (Optional):** The connection logic in `src/database/connection.py` uses the `INCLUDE_TABLES` and `SAMPLE_ROWS` environment variables (loaded via `src/config/settings.py`) to control schema introspection. You can limit the tables the agent sees or adjust sample rows by setting these variables in your `.env` file.
 
-4.  **Restart the Server:** If the server is running (and you changed the `.env` file or code), stop it (Ctrl+C) and restart it with `uvicorn ai_sql_agent.app:app --reload` (ensuring your main development virtual environment is still active). It will now connect to and query your custom database.
+4.  **Restart the Server:** If the server is running and you changed the `.env` file, stop it (Ctrl+C) and restart it with `uvicorn app_api_handler:app --reload` (ensuring your main development virtual environment is still active). It will now connect to and query your custom database using the new settings.
 
-## Multi-Step Query Example
-        # Database URI (Optional - if not set, defaults to the included SQLite DB)
-        # Example for PostgreSQL: DATABASE_URI=postgresql+psycopg2://user:password@host:port/database
-        # DATABASE_URI=sqlite:///data/northwind.db # Default if unset in code
+## Jupyter Notebook for Examples
 
-        # Google API Key for Gemini model (Required for the LLM agent)
-        GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY"
-
-        # LangChain API Key for tracing (Optional, for LangSmith)
-        # LANGCHAIN_API_KEY="YOUR_LANGCHAIN_API_KEY"
-        # LANGCHAIN_TRACING_V2=true # Set to true to enable LangSmith tracing if key is provided
-        ```
-    *   **Required:** You *must* provide a `GOOGLE_API_KEY`.
-    *   **Optional:** Set `DATABASE_URI` to connect to your own database. If omitted, it defaults to the included `data/northwind.db` SQLite database.
-    *   *Security Note:* The `.env` file is listed in `.gitignore`. **Never commit your `.env` file.**
-
-2.  **Run the FastAPI Server:**
-    Once installed and configured, start the API server using Uvicorn:
-    ```bash
-    uvicorn ai_sql_agent.app:app --reload
-    ```
-    *   `ai_sql_agent.app:app`: Tells Uvicorn where to find the FastAPI application instance (`app`) within the installed package.
-    *   `--reload`: Automatically restarts the server when code changes are detected (useful during development).
-
-    The server will typically start on `http://127.0.0.1:8000`. Look for output similar to:
-    ```
-    INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-    INFO:     Started reloader process [xxxxx] using StatReload
-    INFO:     Started server process [xxxxx]
-    INFO:     Waiting for application startup.
-    INFO:     Successfully connected to database: sqlite:///data/northwind.db # Or your custom DB URI
-    INFO:     LLM and Agent initialized successfully.
-    INFO:     Application startup complete.
-    ```
-    *(Note: If initialization fails due to a missing `GOOGLE_API_KEY` or database connection issues, you'll see error messages here, and the `/query` endpoint might return an error.)*
-
-3.  **Send Queries via API:**
-    Use a tool like `curl` or any API client (like Postman, Insomnia) to send POST requests to the `/query` endpoint.
-
-    **Example using `curl`:**
-    ```bash
-    curl -X POST http://127.0.0.1:8000/query \
-    -H "Content-Type: application/json" \
-    -d '{
-      "question": "How many customers are there in Germany?"
-    }'
-    ```
-
-    **Parameters:**
-    *   `-X POST`: Specifies the HTTP method.
-    *   `http://127.0.0.1:8000/query`: The URL of the query endpoint.
-    *   `-H "Content-Type: application/json"`: Sets the content type header.
-    *   `-d '{ "question": "..." }'`: Provides the JSON payload containing the natural language question.
-
-4.  **Receive the Answer:**
-    The API will respond with a JSON object containing the answer.
-
-    **Example Response:**
-    ```json
-    {
-      "answer": "There are 11 customers in Germany."
-    }
-    ```
-    *(The exact wording of the answer depends on the LLM.)*
-
-    If an error occurs during processing, you might receive a JSON response with an error detail, like:
-    ```json
-    {
-      "detail": "An internal error occurred while processing your query."
-    }
-    ```
-
-5.  **Access API Docs (Swagger UI):**
-    While the server is running, you can access interactive API documentation by navigating to `http://127.0.0.1:8000/docs` in your web browser. This interface (Swagger UI) allows you to explore and test the API endpoints directly.
-
-## Connecting to a Custom Database
-
-To connect the API agent to your own database:
-
-1.  **Install Database Driver:** Ensure you have the necessary Python driver for your database installed (e.g., `psycopg2-binary` for PostgreSQL).
-2.  **Update Database URI:** Modify the part of the agent's code where the database connection is established. This typically involves changing the SQLAlchemy database URI string.
-
-    *   **Via `.env` file:** The recommended method is to set the `DATABASE_URI` environment variable in your `.env` file. The application will automatically pick it up.
-        ```dotenv
-        # In .env file
-        DATABASE_URI="postgresql+psycopg2://user:password@host:port/database"
-        ```
-    *   **Modifying Code (If necessary):** If you need more complex configuration, you can modify the `DATABASE_URI` definition directly within `ai_sql_agent/app.py`, but using `.env` is preferred.
-
-    **Example URI Formats:**
-    *   **SQLite (File-based):** `sqlite:///path/to/your/database.db`
-    *   **PostgreSQL:** `postgresql+psycopg2://user:password@host:port/database`
-        ```python
-    *   **MySQL:** `mysql+mysqlconnector://user:password@host:port/database`
-    *   **Other Databases:** Refer to the [SQLAlchemy documentation](https://docs.sqlalchemy.org/en/20/core/engines.html#database-urls) for the correct URI format.
-
-3.  **Schema Awareness (Optional):** LangChain's `SQLDatabase` utility automatically inspects the schema. For very large schemas, you can limit the tables the agent sees by modifying the `SQLDatabase` instantiation in `ai_sql_agent/app.py`:
-    ```python
-    # In ai_sql_agent/app.py, when creating the db object:
-    db = SQLDatabase.from_uri(
-        DATABASE_URI, # Uses the URI from .env or default
-        include_tables=['users', 'orders'], # Example: Only include these tables
-        sample_rows_in_table_info=3 # Include sample rows in schema info
-    )
-    ```
-
-4.  **Restart the Server:** If the server is running, stop it (Ctrl+C) and restart it with `uvicorn ai_sql_agent.app:app --reload` to apply the changes. It will now connect to and query your custom database.
-
-## Multi-Step Query Example
-
-Sometimes, answering a question requires multiple steps or intermediate queries. The LangChain agent (especially function-calling models or ReAct-style agents) can handle this.
-
-**Example Scenario:** "Which customer ordered the most 'Chai' product?"
-
-The agent might perform steps like this (simplified):
-
-1.  **Find Product ID:** Ask the DB for the ID of the product named 'Chai'. (e.g., `SELECT ProductID FROM Products WHERE ProductName = 'Chai';`) -> Gets ProductID (e.g., 1)
-2.  **Find Orders with Product:** Ask the DB for orders containing that ProductID. (e.g., `SELECT OrderID, Quantity FROM "Order Details" WHERE ProductID = 1;`)
-3.  **Aggregate Quantities:** Ask the DB to group the results by customer and sum quantities (might involve joining Orders and Customers tables). (e.g., `SELECT c.CustomerID, c.CompanyName, SUM(od.Quantity) AS TotalQuantity FROM Customers c JOIN Orders o ON c.CustomerID = o.CustomerID JOIN "Order Details" od ON o.OrderID = od.OrderID WHERE od.ProductID = 1 GROUP BY c.CustomerID ORDER BY TotalQuantity DESC LIMIT 1;`)
-4.  **Format Response:** Present the customer who ordered the most.
-
-*(Note: The exact internal steps depend heavily on the specific agent implementation and the LLM's reasoning capabilities.)*
+An example Jupyter Notebook (`AI_SQL_QA_Agent_with_LangChain.ipynb`) is included in the repository root. This notebook provides a space for interactive testing and experimentation with the agent's core logic outside the FastAPI application context.
 
 ## Security Notes
 
