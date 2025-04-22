@@ -5,3 +5,7 @@ langgraph
 langchain-core
 langchain_google_genai
 python-dotenv
+fastapi
+uvicorn[standard]
+pytest
+httpx
