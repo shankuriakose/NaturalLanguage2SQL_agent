@@ -1,39 +1,71 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel
+import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
-from src.api.routes import router
-from src.database.connection import DatabaseConnection
-from src.config.settings import get_settings
+import logging
+import time
 
-app = FastAPI(
-    title="SQL Q&A Agent API",
-    description="API for natural language to SQL queries using LangChain",
-    version="1.0.0"
-)
+# Custom imports
+from src.agent.agent import run_sql_query_agent  # Update path as needed
+from src.models.api_models import QueryRequest
+from src.utils.logger import logger
 
-# Add CORS middleware
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI()
+
+# Configure CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include API routes
-app.include_router(router)
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Middleware to log all requests and responses"""
+    start_time = time.time()
+    logger.info(f"Request started: {request.method} {request.url}")
+    
+    response = await call_next(request)
+    
+    process_time = time.time() - start_time
+    logger.info(f"Request completed: {request.method} {request.url} - Status: {response.status_code} - Duration: {process_time:.2f}s")
+    
+    return response
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize services on startup"""
-    # Get settings and initialize database connection
-    settings = get_settings()
-    DatabaseConnection.get_connection()
+    """Log when the application starts"""
+    logger.info("Application starting up")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Cleanup on shutdown"""
-    DatabaseConnection.close()
+    """Log when the application shuts down"""
+    logger.info("Application shutting down")
+
+@app.get("/")
+async def read_root():
+    """Root endpoint"""
+    logger.info("Root endpoint accessed")
+    return {"message": "Welcome to the LangChain SQL Q&A Agent API!"}
+
+@app.post("/query")
+async def process_query(request: QueryRequest):
+    """Process a natural language query"""
+    logger.info(f"Received query request: {request.question}")
+    try:
+        result = run_sql_query_agent(request.question)
+        logger.info("Query processed successfully")
+        return {"answer": result}
+    except Exception as e:
+        error_msg = f"Error processing query: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
