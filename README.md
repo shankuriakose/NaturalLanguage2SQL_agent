@@ -8,8 +8,8 @@ This project provides a FastAPI application serving an intelligent agent built w
 
 -   [Project Overview](#project-overview)
 -   [System Architecture](#system-architecture)
--   [Setup Instructions](#setup-instructions)
--   [How to Use](#how-to-use)
+-   [Development & Automation with Tox](#development--automation-with-tox)
+-   [Running the Application](#running-the-application)
 -   [Connecting to a Custom Database](#connecting-to-a-custom-database)
 -   [Multi-Step Query Example](#multi-step-query-example)
 -   [Security Notes](#security-notes)
@@ -56,80 +56,207 @@ The system combines a FastAPI web server with a LangChain SQL agent:
 ```
 *(Diagram: Simplified text representation of the API flow)*
 
-## Setup Instructions
+## Development & Automation with Tox
 
-Follow these steps to set up and run the agent:
+This project uses [Tox](https://tox.wiki/) to automate testing, linting, and formatting across multiple Python versions in isolated environments. This ensures code quality and compatibility.
 
 1.  **Prerequisites:**
-    *   Python 3.8+ installed.
-    *   Access to a terminal or command prompt.
+    *   Python 3.8+ installed. You might need multiple Python versions (e.g., 3.9, 3.10, 3.11) installed and available in your PATH if you want to run tests against all configured environments.
     *   Git installed (optional, for cloning).
 
-2.  **Clone the Repository (Optional):**
+2.  **Clone the Repository (if you haven't already):**
     ```bash
     git clone <repository_url> # Replace with the actual URL if applicable
     cd <repository_directory>
     ```
 
-3.  **Create a Virtual Environment (Recommended):**
+3.  **Set up a Development Virtual Environment:**
+    It's recommended to have a base virtual environment for running Tox itself and for general development tasks (like running the application manually).
     ```bash
+    # Create a virtual environment (do this once)
     python -m venv venv
-    source venv/bin/activate # On Windows use `venv\Scripts\activate`
+
+    # Activate the virtual environment
+    # Linux/macOS:
+    source venv/bin/activate
+    # Windows:
+    # .\venv\Scripts\activate.bat
     ```
 
 4.  **Install Dependencies:**
-    Install the required Python packages using the `requirements.txt` file:
+    Install both the main application dependencies and the development dependencies (which include Tox, pytest, linters, etc.) into your activated virtual environment:
     ```bash
+    # Install main requirements
     pip install -r requirements.txt
+
+    # Install development requirements
+    pip install -r requirements-dev.txt
     ```
-    This will install `fastapi`, `uvicorn`, `langchain`, `langchain-google-genai`, `python-dotenv`, and other necessary libraries.
-    *Note: If connecting to databases other than SQLite, you might need to manually install additional database drivers (e.g., `psycopg2-binary` for PostgreSQL, `mysql-connector-python` for MySQL).*
 
-5.  **Database Setup:**
-    *   The repository includes a sample SQLite database: `northwind.db`. No further setup is needed to use this sample.
-    *   To connect to your own database, see the [Connecting to a Custom Database](#connecting-to-a-custom-database) section.
+5.  **Using Tox:**
+    Once dependencies (especially `tox`) are installed in your active environment, you can use the following commands from the project root directory:
 
-6.  **API Keys and Environment Variables:**
-    *   This agent uses Google's Generative AI (Gemini). You need a Google API key.
-    *   Create a `.env` file in the project root directory by copying the example file:
+    *   **Run all default test environments (py39, py310, py311):**
         ```bash
-        cp .env.example .env
+        tox
         ```
-    *   Edit the `.env` file and add your keys/settings:
-        ```dotenv
-        # Database URI (optional, defaults to sqlite:///data/northwind.db in main.py)
-        # Example for PostgreSQL: DATABASE_URI=postgresql+psycopg2://user:password@host:port/database
-        DATABASE_URI=sqlite:///data/northwind.db
+        Tox will create separate virtual environments for each Python version listed in `tox.ini`, install dependencies, and run the tests using `pytest`.
 
-        # Google API Key for Gemini model (Required)
-        GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY"
-
-        # LangChain API Key for tracing (Optional, for LangSmith)
-        LANGCHAIN_API_KEY="YOUR_LANGCHAIN_API_KEY"
-        LANGCHAIN_TRACING_V2=true # Set to true to enable LangSmith tracing if key is provided
+    *   **Run tests for a specific Python version:**
+        ```bash
+        tox -e py310  # Replace py310 with py39, py311, etc.
         ```
-    *   *Security Note:* The `.env` file is listed in `.gitignore` to prevent accidental commits of your secrets. **Never commit your `.env` file.**
 
-## How to Use
+    *   **Run linters (flake8, black check, isort check):**
+        ```bash
+        tox -e lint
+        ```
+        This checks for code style issues without modifying files.
 
-1.  **Ensure Setup is Complete:** Verify you have completed all steps in the [Setup Instructions](#setup-instructions), including installing dependencies and creating/populating your `.env` file.
+    *   **Run formatters (black, isort):**
+        ```bash
+        tox -e format
+        ```
+        This automatically formats your code according to the project's standards.
+
+    **Note:** Tox manages its own virtual environments within the `.tox` directory (which is ignored by Git). You don't need to manually activate these environments.
+
+## Running the Application
+
+Running the application for manual testing or development is separate from the Tox automation workflow.
+
+1.  **Ensure Development Environment is Set Up:** Verify you have:
+    *   Created and activated your main virtual environment (e.g., `source venv/bin/activate`).
+    *   Installed the main dependencies (`pip install -r requirements.txt`).
+    *   Created and configured your `.env` file in the project root with the necessary API keys (especially `GOOGLE_API_KEY`). You might need to copy it from `.env.example` first (`cp .env.example .env`).
 
 2.  **Run the FastAPI Server:**
-    Start the API server using Uvicorn. The `--reload` flag automatically restarts the server when code changes are detected (useful for development).
+    While your main development virtual environment is active, start the API server using Uvicorn:
     ```bash
-    uvicorn main:app --reload
+    uvicorn ai_sql_agent.app:app --reload
     ```
+    *   `ai_sql_agent.app:app`: Tells Uvicorn where to find the FastAPI application instance (`app`).
+    *   `--reload`: Automatically restarts the server when code changes are detected (useful during development).
+
     The server will typically start on `http://127.0.0.1:8000`. Look for output similar to:
     ```
     INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
     INFO:     Started reloader process [xxxxx] using StatReload
     INFO:     Started server process [xxxxx]
     INFO:     Waiting for application startup.
-    INFO:     Successfully connected to database: sqlite:///data/northwind.db
+    INFO:     Successfully connected to database: sqlite:///data/northwind.db # Or your custom DB URI
     INFO:     LLM and Agent initialized successfully.
     INFO:     Application startup complete.
     ```
-    *(Note: If initialization fails due to missing API keys or DB issues, you'll see error messages here, and the `/query` endpoint might be unavailable.)*
+    *(Note: If initialization fails due to a missing `GOOGLE_API_KEY` or database connection issues, you'll see error messages here, and the `/query` endpoint might return an error.)*
+
+3.  **Send Queries via API:**
+    Use a tool like `curl` or any API client (like Postman, Insomnia) to send POST requests to the `/query` endpoint.
+
+    **Example using `curl`:**
+    ```bash
+    curl -X POST http://127.0.0.1:8000/query \
+    -H "Content-Type: application/json" \
+    -d '{
+      "question": "How many customers are there in Germany?"
+    }'
+    ```
+
+    **Parameters:**
+    *   `-X POST`: Specifies the HTTP method.
+    *   `http://127.0.0.1:8000/query`: The URL of the query endpoint.
+    *   `-H "Content-Type: application/json"`: Sets the content type header.
+    *   `-d '{ "question": "..." }'`: Provides the JSON payload containing the natural language question.
+
+4.  **Receive the Answer:**
+    The API will respond with a JSON object containing the answer.
+
+    **Example Response:**
+    ```json
+    {
+      "answer": "There are 11 customers in Germany."
+    }
+    ```
+    *(The exact wording of the answer depends on the LLM.)*
+
+    If an error occurs during processing, you might receive a JSON response with an error detail, like:
+    ```json
+    {
+      "detail": "An internal error occurred while processing your query."
+    }
+    ```
+
+5.  **Access API Docs (Swagger UI):**
+    While the server is running, you can access interactive API documentation by navigating to `http://127.0.0.1:8000/docs` in your web browser. This interface (Swagger UI) allows you to explore and test the API endpoints directly.
+
+## Connecting to a Custom Database
+
+To connect the API agent to your own database:
+
+1.  **Install Database Driver:** If you are using a database other than SQLite, ensure the necessary driver is installed in your *main development* virtual environment. Add the driver (e.g., `psycopg2-binary`) to `requirements.txt` and run `pip install -r requirements.txt` again while the environment is active.
+2.  **Update Database URI:** Configure the database connection.
+
+    *   **Via `.env` file:** The recommended method is to set the `DATABASE_URI` environment variable in your `.env` file. The application will automatically pick it up.
+        ```dotenv
+        # In .env file
+        DATABASE_URI="postgresql+psycopg2://user:password@host:port/database"
+        ```
+    *   **Modifying Code (If necessary):** If you need more complex configuration, you can modify the `DATABASE_URI` definition directly within `ai_sql_agent/app.py`, but using `.env` is preferred.
+
+    **Example URI Formats:**
+    *   **SQLite (File-based):** `sqlite:///path/to/your/database.db`
+    *   **PostgreSQL:** `postgresql+psycopg2://user:password@host:port/database`
+        ```python
+    *   **MySQL:** `mysql+mysqlconnector://user:password@host:port/database`
+    *   **Other Databases:** Refer to the [SQLAlchemy documentation](https://docs.sqlalchemy.org/en/20/core/engines.html#database-urls) for the correct URI format.
+
+3.  **Schema Awareness (Optional):** LangChain's `SQLDatabase` utility automatically inspects the schema. For very large schemas, you can limit the tables the agent sees by modifying the `SQLDatabase` instantiation in `ai_sql_agent/app.py`:
+    ```python
+    # In ai_sql_agent/app.py, when creating the db object:
+    db = SQLDatabase.from_uri(
+        DATABASE_URI, # Uses the URI from .env or default
+        include_tables=['users', 'orders'], # Example: Only include these tables
+        sample_rows_in_table_info=3 # Include sample rows in schema info
+    )
+    ```
+
+4.  **Restart the Server:** If the server is running (and you changed the `.env` file or code), stop it (Ctrl+C) and restart it with `uvicorn ai_sql_agent.app:app --reload` (ensuring your main development virtual environment is still active). It will now connect to and query your custom database.
+
+## Multi-Step Query Example
+        # Database URI (Optional - if not set, defaults to the included SQLite DB)
+        # Example for PostgreSQL: DATABASE_URI=postgresql+psycopg2://user:password@host:port/database
+        # DATABASE_URI=sqlite:///data/northwind.db # Default if unset in code
+
+        # Google API Key for Gemini model (Required for the LLM agent)
+        GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY"
+
+        # LangChain API Key for tracing (Optional, for LangSmith)
+        # LANGCHAIN_API_KEY="YOUR_LANGCHAIN_API_KEY"
+        # LANGCHAIN_TRACING_V2=true # Set to true to enable LangSmith tracing if key is provided
+        ```
+    *   **Required:** You *must* provide a `GOOGLE_API_KEY`.
+    *   **Optional:** Set `DATABASE_URI` to connect to your own database. If omitted, it defaults to the included `data/northwind.db` SQLite database.
+    *   *Security Note:* The `.env` file is listed in `.gitignore`. **Never commit your `.env` file.**
+
+2.  **Run the FastAPI Server:**
+    Once installed and configured, start the API server using Uvicorn:
+    ```bash
+    uvicorn ai_sql_agent.app:app --reload
+    ```
+    *   `ai_sql_agent.app:app`: Tells Uvicorn where to find the FastAPI application instance (`app`) within the installed package.
+    *   `--reload`: Automatically restarts the server when code changes are detected (useful during development).
+
+    The server will typically start on `http://127.0.0.1:8000`. Look for output similar to:
+    ```
+    INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+    INFO:     Started reloader process [xxxxx] using StatReload
+    INFO:     Started server process [xxxxx]
+    INFO:     Waiting for application startup.
+    INFO:     Successfully connected to database: sqlite:///data/northwind.db # Or your custom DB URI
+    INFO:     LLM and Agent initialized successfully.
+    INFO:     Application startup complete.
+    ```
+    *(Note: If initialization fails due to a missing `GOOGLE_API_KEY` or database connection issues, you'll see error messages here, and the `/query` endpoint might return an error.)*
 
 3.  **Send Queries via API:**
     Use a tool like `curl` or any API client (like Postman, Insomnia) to send POST requests to the `/query` endpoint.
@@ -177,37 +304,31 @@ To connect the API agent to your own database:
 1.  **Install Database Driver:** Ensure you have the necessary Python driver for your database installed (e.g., `psycopg2-binary` for PostgreSQL).
 2.  **Update Database URI:** Modify the part of the agent's code where the database connection is established. This typically involves changing the SQLAlchemy database URI string.
 
-    *   **SQLite (File-based):**
-        ```python
-        from langchain_community.utilities import SQLDatabase
-        db_uri = "sqlite:///path/to/your/database.db"
-        db = SQLDatabase.from_uri(db_uri)
+    *   **Via `.env` file:** The recommended method is to set the `DATABASE_URI` environment variable in your `.env` file. The application will automatically pick it up.
+        ```dotenv
+        # In .env file
+        DATABASE_URI="postgresql+psycopg2://user:password@host:port/database"
         ```
-    *   **PostgreSQL:**
+    *   **Modifying Code (If necessary):** If you need more complex configuration, you can modify the `DATABASE_URI` definition directly within `ai_sql_agent/app.py`, but using `.env` is preferred.
+
+    **Example URI Formats:**
+    *   **SQLite (File-based):** `sqlite:///path/to/your/database.db`
+    *   **PostgreSQL:** `postgresql+psycopg2://user:password@host:port/database`
         ```python
-        # pip install psycopg2-binary
-        db_uri = "postgresql+psycopg2://user:password@host:port/database"
-        db = SQLDatabase.from_uri(db_uri)
-        ```
-    *   **MySQL:**
-        ```python
-        # pip install mysql-connector-python
-        db_uri = "mysql+mysqlconnector://user:password@host:port/database"
-        db = SQLDatabase.from_uri(db_uri)
-        ```
+    *   **MySQL:** `mysql+mysqlconnector://user:password@host:port/database`
     *   **Other Databases:** Refer to the [SQLAlchemy documentation](https://docs.sqlalchemy.org/en/20/core/engines.html#database-urls) for the correct URI format.
 
-3.  **Schema Awareness (Optional):** LangChain's `SQLDatabase` utility automatically inspects the schema. For very large schemas, you can limit the tables the agent sees by modifying the `SQLDatabase` instantiation in `main.py`:
+3.  **Schema Awareness (Optional):** LangChain's `SQLDatabase` utility automatically inspects the schema. For very large schemas, you can limit the tables the agent sees by modifying the `SQLDatabase` instantiation in `ai_sql_agent/app.py`:
     ```python
-    # In main.py, when creating the db object:
+    # In ai_sql_agent/app.py, when creating the db object:
     db = SQLDatabase.from_uri(
-        db_uri,
-        include_tables=['users', 'orders'], # Only include these tables
+        DATABASE_URI, # Uses the URI from .env or default
+        include_tables=['users', 'orders'], # Example: Only include these tables
         sample_rows_in_table_info=3 # Include sample rows in schema info
     )
     ```
 
-4.  **Restart the Server:** If the server is running, stop it (Ctrl+C) and restart it with `uvicorn main:app --reload` to apply the changes. It will now connect to and query your custom database.
+4.  **Restart the Server:** If the server is running, stop it (Ctrl+C) and restart it with `uvicorn ai_sql_agent.app:app --reload` to apply the changes. It will now connect to and query your custom database.
 
 ## Multi-Step Query Example
 
@@ -227,11 +348,11 @@ The agent might perform steps like this (simplified):
 ## Security Notes
 
 *   **API Keys:** Protect your LLM API keys. Do not commit them directly into your codebase. Use environment variables or a secure secrets manager.
-*   **Database Credentials:** Secure your database connection string (`DATABASE_URI`) in the `.env` file. Do not hardcode it in `main.py`.
+*   **Database Credentials:** Secure your database connection string (`DATABASE_URI`) in the `.env` file. Do not hardcode it in the application code.
 *   **Permissions:** Ensure the database user specified in the `DATABASE_URI` has the minimum required permissions (e.g., read-only access if the agent only needs to query data). Avoid using root or admin database users.
 *   **API Endpoint Security:** Consider adding API authentication/authorization mechanisms to the FastAPI application if deploying it in a production or shared environment (e.g., using API keys, OAuth2). This is not implemented by default.
 *   **Input Validation:** The API uses Pydantic for basic request body validation (`QueryRequest`). Further input sanitization might be needed depending on how the question is used internally, although the LangChain agent handles much of the interaction.
-*   **Query Inspection:** For sensitive environments, leverage LangSmith (by setting the appropriate environment variables) to monitor the SQL queries generated by the LLM before they are executed. This helps prevent unintended data exposure or modification attempts (though the agent is currently read-only).
+*   **Query Inspection:** For sensitive environments, leverage LangSmith (by setting the appropriate environment variables) to monitor the SQL queries generated by the LLM before they are executed. This helps prevent unintended data exposure or modification attempts (though the agent is currently designed for read-only access).
 *   **Rate Limiting/Cost Control:** LLM API calls incur costs. If deploying publicly, implement rate limiting on the FastAPI endpoint to prevent abuse and control expenses.
 *   **Error Handling:** The API returns generic error messages. Ensure detailed internal errors (like specific database errors or LLM exceptions) are logged securely on the server-side and not exposed directly to the client.
 
@@ -252,17 +373,17 @@ We welcome contributions! If you'd like to contribute:
 ## FAQ
 
 **Q1: The agent gives an error about not finding a table.**
-*   **A:** Double-check that the table name exists in your database and that the database user has permission to see it. If you specified `include_tables` during setup, ensure the required table is listed.
+*   **A:** Double-check that the table name exists in your database and that the database user (specified in `DATABASE_URI`) has permission to see it. If you specified `include_tables` during setup in `ai_sql_agent/app.py`, ensure the required table is listed.
 
 **Q2: The agent generates incorrect SQL queries.**
 *   **A:** This can happen due to several reasons:
     *   **LLM Limitations:** The LLM might misunderstand the question or the schema. Try rephrasing the question.
-    *   **Schema Complexity:** Very complex schemas or ambiguous naming can confuse the LLM. Consider simplifying table/column names or providing more schema context.
+    *   **Schema Complexity:** Very complex schemas or ambiguous naming can confuse the LLM. Consider simplifying table/column names or providing more schema context (e.g., using `table_info` in `SQLDatabase`).
     *   **Agent/Prompt Configuration:** The underlying prompts used by the LangChain agent might need tuning.
     *   **Few-Shot Examples:** Providing few-shot examples of question-to-SQL pairs during agent setup can sometimes improve accuracy.
 
 **Q3: How do I limit the tables the API agent can access?**
-*   **A:** Modify the `SQLDatabase` instantiation in `main.py` using the `include_tables` argument, as shown in the [Connecting to a Custom Database](#connecting-to-a-custom-database) section. Alternatively, use a database user with restricted table permissions in your `DATABASE_URI`.
+*   **A:** Modify the `SQLDatabase` instantiation in `ai_sql_agent/app.py` using the `include_tables` argument, as shown in the [Connecting to a Custom Database](#connecting-to-a-custom-database) section. Alternatively, use a database user with restricted table permissions in your `DATABASE_URI`.
 
 **Q4: Can the API agent modify the database (INSERT, UPDATE, DELETE)?**
 *   **A:** The current agent configuration using `create_sql_agent` is designed primarily for read-only (`SELECT`) queries. Enabling write capabilities would require significant changes to the agent setup and prompts, and dramatically increases security risks. It is strongly discouraged unless absolutely necessary and implemented with extreme caution and robust safeguards.

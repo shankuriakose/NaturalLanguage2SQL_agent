@@ -2,15 +2,8 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 from unittest.mock import patch, AsyncMock
-import sys
-import os
-
-# Add the project root directory to the Python path
-# This allows importing 'main' from the parent directory
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-# Import the FastAPI app instance AFTER modifying sys.path
-from main import app
+# Import the FastAPI app instance from the new location
+from ai_sql_agent.app import app
 
 # Mark all tests in this module to be run with asyncio
 pytestmark = pytest.mark.asyncio
@@ -31,7 +24,7 @@ async def test_read_root(client: AsyncClient):
 async def test_query_endpoint_success(client: AsyncClient):
     """Test the '/query' endpoint with a mocked successful agent response."""
     # Mock the agent_executor's ainvoke method
-    with patch('main.agent_executor.ainvoke', new_callable=AsyncMock) as mock_ainvoke:
+    with patch('ai_sql_agent.app.agent_executor.ainvoke', new_callable=AsyncMock) as mock_ainvoke:
         # Configure the mock to return a specific dictionary when called
         mock_ainvoke.return_value = {'output': 'mocked answer'}
 
@@ -48,7 +41,7 @@ async def test_query_endpoint_success(client: AsyncClient):
 async def test_query_endpoint_agent_initialization_error(client: AsyncClient):
     """Test the '/query' endpoint when the agent_executor is None (initialization failed)."""
     # Temporarily set agent_executor to None for this test
-    with patch('main.agent_executor', None):
+    with patch('ai_sql_agent.app.agent_executor', None):
         response = await client.post("/query", json={"question": "test question"})
         # Expect 503 Service Unavailable based on current implementation
         assert response.status_code == 503
@@ -58,7 +51,7 @@ async def test_query_endpoint_agent_initialization_error(client: AsyncClient):
 async def test_query_endpoint_agent_invocation_error(client: AsyncClient):
     """Test the '/query' endpoint when agent invocation raises an exception."""
     # Mock agent_executor's ainvoke to raise an exception
-    with patch('main.agent_executor.ainvoke', new_callable=AsyncMock) as mock_ainvoke:
+    with patch('ai_sql_agent.app.agent_executor.ainvoke', new_callable=AsyncMock) as mock_ainvoke:
         mock_ainvoke.side_effect = Exception("Test agent error")
 
         # Send a POST request
